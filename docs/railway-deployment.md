@@ -67,7 +67,7 @@ curl --fail https://your-api-production.up.railway.app/health
 Expected response:
 
 ```json
-{ "status": "ok" }
+{ "status": "ok", "database": "ok", "redis": "ok" }
 ```
 
 Production intentionally disables `/docs` and `/openapi.json`. Use staging for API documentation checks.
