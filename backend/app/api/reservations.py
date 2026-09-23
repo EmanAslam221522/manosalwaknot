@@ -1,0 +1,87 @@
+from datetime import UTC, datetime
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query, Request, status
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session, selectinload
+
+from app.api.deps import current_user
+from app.core.database import get_db
+from app.core.errors import ApiError
+from app.domain import audit, pagination, reservation_detail, reservation_summary
+from app.models import FoodListing, FoodStatus, Notification, Reservation, ReservationEvent, ReservationStatus, Role, User
+from app.schemas import ReservationCreate, ReservationDetailOut, ReservationPage, ReservationSummaryOut
+
+router = APIRouter(prefix="/reservations", tags=["reservations"])
+ACTIVE_STATES = {ReservationStatus.PENDING, ReservationStatus.CONFIRMED, ReservationStatus.READY}
+
+
+def reservation_load() -> tuple[object, object]:
+    return selectinload(Reservation.food).selectinload(FoodListing.provider), selectinload(Reservation.food).selectinload(FoodListing.location)
+
+
+def authorized(reservation: Reservation, user: User) -> bool:
+    roles = {entry.role for entry in user.roles}
+    return user.id in {reservation.recipient_id, reservation.food.provider_id} or bool(roles.intersection({Role.ADMIN, Role.SUPER_ADMIN}))
+
+
+@router.get("", response_model=ReservationPage)
+def list_reservations(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100), user: User = Depends(current_user), db: Session = Depends(get_db)) -> ReservationPage:
+    condition = or_(Reservation.recipient_id == user.id, Reservation.food.has(FoodListing.provider_id == user.id))
+    total = db.scalar(select(func.count()).select_from(Reservation).where(condition)) or 0
+    records = db.scalars(select(Reservation).options(*reservation_load()).where(condition).order_by(Reservation.updated_at.desc()).offset((page - 1) * page_size).limit(page_size)).all()
+    return ReservationPage(items=[reservation_summary(item) for item in records], meta=pagination(total, page, page_size))
+
+
+@router.post("", response_model=ReservationSummaryOut, status_code=status.HTTP_201_CREATED)
+def create_reservation(payload: ReservationCreate, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> ReservationSummaryOut:
+    food = db.scalar(select(FoodListing).options(selectinload(FoodListing.provider), selectinload(FoodListing.location)).where(FoodListing.id == payload.food_listing_id).with_for_update())
+    now = datetime.now(UTC)
+    if food is None or food.status != FoodStatus.PUBLISHED:
+        raise ApiError(404, "FOOD_NOT_AVAILABLE", "This food is no longer available.")
+    if food.provider_id == user.id:
+        raise ApiError(409, "OWN_LISTING_RESERVATION", "You cannot reserve your own listing.")
+    if food.pickup_end <= now or food.expires_at <= now:
+        raise ApiError(409, "FOOD_EXPIRED", "This food is no longer available.")
+    if payload.quantity > food.servings_available:
+        raise ApiError(409, "RESERVATION_QUANTITY_UNAVAILABLE", "The requested quantity is no longer available.")
+    duplicate = db.scalar(select(Reservation.id).where(Reservation.food_listing_id == food.id, Reservation.recipient_id == user.id, Reservation.status.in_(ACTIVE_STATES)))
+    if duplicate:
+        raise ApiError(409, "ACTIVE_RESERVATION_EXISTS", "You already have an active reservation for this listing.")
+    food.servings_available -= payload.quantity
+    reservation = Reservation(recipient_id=user.id, food_listing_id=food.id, quantity=payload.quantity, status=ReservationStatus.CONFIRMED, pickup_address=food.location.address, handover_instructions=food.location.pickup_instructions)
+    db.add(reservation)
+    db.flush()
+    db.add(ReservationEvent(reservation_id=reservation.id, actor_id=user.id, new_state=ReservationStatus.CONFIRMED, request_id=request.state.request_id, actor_label=user.display_name))
+    db.add(Notification(user_id=food.provider_id, type="reservation_confirmed", title="New reservation", body=f"{payload.quantity} servings of {food.title} were reserved.", route=f"/reservations/{reservation.id}"))
+    audit(db, user.id, "reservation.created", "reservation", reservation.id, request.state.request_id, {"quantity": payload.quantity})
+    db.commit()
+    return reservation_summary(reservation)
+
+
+@router.get("/{reservation_id}", response_model=ReservationDetailOut)
+def get_reservation(reservation_id: UUID, user: User = Depends(current_user), db: Session = Depends(get_db)) -> ReservationDetailOut:
+    reservation = db.scalar(select(Reservation).options(*reservation_load()).where(Reservation.id == reservation_id))
+    if reservation is None or not authorized(reservation, user):
+        raise ApiError(404, "RESERVATION_NOT_FOUND", "This reservation was not found.")
+    events = list(db.scalars(select(ReservationEvent).where(ReservationEvent.reservation_id == reservation.id).order_by(ReservationEvent.occurred_at)).all())
+    can_show = reservation.status in ACTIVE_STATES | {ReservationStatus.PICKED_UP, ReservationStatus.DELIVERED}
+    return reservation_detail(reservation, events, can_show)
+
+
+@router.post("/{reservation_id}/cancel", response_model=ReservationSummaryOut)
+def cancel_reservation(reservation_id: UUID, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> ReservationSummaryOut:
+    reservation = db.scalar(select(Reservation).options(*reservation_load()).where(Reservation.id == reservation_id).with_for_update())
+    if reservation is None or not authorized(reservation, user):
+        raise ApiError(404, "RESERVATION_NOT_FOUND", "This reservation was not found.")
+    if reservation.status not in ACTIVE_STATES:
+        raise ApiError(409, "INVALID_RESERVATION_TRANSITION", "This reservation can no longer be cancelled.")
+    previous = reservation.status
+    reservation.status = ReservationStatus.CANCELLED
+    reservation.food.servings_available += reservation.quantity
+    db.add(ReservationEvent(reservation_id=reservation.id, actor_id=user.id, previous_state=previous, new_state=ReservationStatus.CANCELLED, request_id=request.state.request_id, actor_label=user.display_name))
+    target = reservation.food.provider_id if user.id == reservation.recipient_id else reservation.recipient_id
+    db.add(Notification(user_id=target, type="reservation_cancelled", title="Reservation cancelled", body=f"The reservation for {reservation.food.title} was cancelled.", route=f"/reservations/{reservation.id}"))
+    audit(db, user.id, "reservation.cancelled", "reservation", reservation.id, request.state.request_id)
+    db.commit()
+    return reservation_summary(reservation)
