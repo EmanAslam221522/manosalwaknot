@@ -33,7 +33,8 @@ A release is blocked until every applicable item is verified in staging with pro
 
 - Development, staging, and production use separate databases, Redis, storage, secrets, push credentials, AI credentials, and API origins.
 - Least-privilege service/DB accounts and encrypted connections are configured.
-- Alembic migration, rollback/forward plan, lint, type checks, unit/integration/security tests, Docker build, and deployment gates pass.
+- Alembic migration, rollback/forward plan, lint, type checks, unit/integration/security tests, Docker build, dynamic `PORT` startup, and `/health` deployment gates pass.
+- Railway uses a PostGIS-capable database service rather than the default PostgreSQL template; PostgreSQL and Redis remain private and persistent.
 - Error monitoring, structured logs, request IDs, latency/database/AI/push dashboards, and alerts are active without sensitive payload logging.
 - Automated PostgreSQL backups have retention configured and a restoration drill has succeeded.
 - Security headers, reverse proxy, TLS, CORS, rate limits, and administrative session controls are reviewed.

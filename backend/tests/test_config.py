@@ -15,6 +15,11 @@ def test_postgresql_url_is_normalized_to_psycopg() -> None:
     assert settings.database_url.startswith("postgresql+psycopg://")
 
 
+def test_railway_postgres_url_is_normalized_to_psycopg() -> None:
+    settings = Settings(**{**BASE, "database_url": "postgres://mano:password@postgres.railway.internal:5432/manosalwa"})
+    assert settings.database_url == "postgresql+psycopg://mano:password@postgres.railway.internal:5432/manosalwa"
+
+
 def test_rejects_non_postgresql_database() -> None:
     with pytest.raises(ValidationError):
         Settings(**{**BASE, "database_url": "sqlite:///local.db"})

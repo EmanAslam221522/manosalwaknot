@@ -7,6 +7,10 @@ from app.core.errors import ApiError
 _redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
 
 
+def check_redis() -> None:
+    _redis.ping()
+
+
 def enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int, subject: str | None = None) -> None:
     client = request.client.host if request.client else "unknown"
     key = f"rate:{scope}:{subject or client}"

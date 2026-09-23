@@ -21,13 +21,15 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=list)
     groq_api_key: SecretStr | None = None
     groq_model: str = "llama-3.3-70b-versatile"
-    groq_base_url: AnyHttpUrl = "https://api.groq.com/openai/v1"  # type: ignore[assignment]
+    groq_base_url: AnyHttpUrl = Field(default_factory=lambda: AnyHttpUrl("https://api.groq.com/openai/v1"))
     otp_debug_code: SecretStr | None = None
     max_upload_bytes: int = Field(default=8_000_000, ge=100_000, le=20_000_000)
 
     @field_validator("database_url")
     @classmethod
     def require_postgresql(cls, value: str) -> str:
+        if value.startswith("postgres://"):
+            value = value.replace("postgres://", "postgresql://", 1)
         if not value.startswith(("postgresql://", "postgresql+psycopg://")):
             raise ValueError("DATABASE_URL must be PostgreSQL")
         return value.replace("postgresql://", "postgresql+psycopg://", 1)

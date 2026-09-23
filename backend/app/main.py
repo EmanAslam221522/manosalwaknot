@@ -10,6 +10,7 @@ from app.api import admin, auth, deliveries, food, mano, notifications, profile,
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.errors import ApiError, api_error_handler
+from app.core.rate_limit import check_redis
 
 settings = get_settings()
 app = FastAPI(
@@ -61,7 +62,8 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 def health() -> dict[str, str]:
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
-    return {"status": "ok"}
+    check_redis()
+    return {"status": "ok", "database": "ok", "redis": "ok"}
 
 
 for router in (auth.router, profile.router, food.router, reservations.router, trust.router, admin.router, notifications.router, deliveries.router, mano.router):
