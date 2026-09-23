@@ -46,11 +46,11 @@ npm run ios          # native iOS development build
 npm run build:pwa    # web/PWA export
 ```
 
-## Railway production deployment
+## Live deployment options
 
-The production API is designed to run as a private-service stack on Railway: a Docker-based FastAPI service, a PostGIS-capable PostgreSQL service, and Redis. Follow [`docs/railway-deployment.md`](docs/railway-deployment.md) for provisioning, variables, migrations, health checks, generated HTTPS domain, PWA publishing, and native test-build configuration.
+For a no-cost staging/demo stack, use Render Free for FastAPI, Neon Free for PostgreSQL with PostGIS/pgvector, and Upstash Free for Redis. Follow [`docs/render-neon-upstash-deployment.md`](docs/render-neon-upstash-deployment.md). Free services have quotas and Render cold starts, so this is not a production-availability setup.
 
-Do not use the default Railway PostgreSQL template for this app. The current schema requires PostGIS, and the selected PostGIS + pgvector image also supports later embedding features; enable persistent storage and backups. Database, Redis, JWT, and Groq credentials stay in Railway and must never be copied into `EXPO_PUBLIC_*` variables.
+Railway remains the simpler single-project option for a paid or credit-backed deployment. Follow [`docs/railway-deployment.md`](docs/railway-deployment.md). Database, Redis, JWT, and Groq credentials stay on backend providers and must never be copied into `EXPO_PUBLIC_*` variables.
 
 ## Local FastAPI backend
 

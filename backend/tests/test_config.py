@@ -16,8 +16,26 @@ def test_postgresql_url_is_normalized_to_psycopg() -> None:
 
 
 def test_railway_postgres_url_is_normalized_to_psycopg() -> None:
-    settings = Settings(**{**BASE, "database_url": "postgres://mano:password@postgres.railway.internal:5432/manosalwa"})
-    assert settings.database_url == "postgresql+psycopg://mano:password@postgres.railway.internal:5432/manosalwa"
+    settings = Settings(
+        **{
+            **BASE,
+            "database_url": "postgres://mano:password@postgres.railway.internal:5432/manosalwa",
+        }
+    )
+    assert (
+        settings.database_url
+        == "postgresql+psycopg://mano:password@postgres.railway.internal:5432/manosalwa"
+    )
+
+
+def test_migration_url_is_normalized_to_psycopg() -> None:
+    settings = Settings(
+        **BASE,
+        migrations_database_url="postgresql://mano:password@direct.neon.tech/manosalwa",
+    )
+    assert settings.migrations_database_url == (
+        "postgresql+psycopg://mano:password@direct.neon.tech/manosalwa"
+    )
 
 
 def test_rejects_non_postgresql_database() -> None:

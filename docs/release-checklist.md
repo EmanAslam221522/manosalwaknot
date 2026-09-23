@@ -34,7 +34,9 @@ A release is blocked until every applicable item is verified in staging with pro
 - Development, staging, and production use separate databases, Redis, storage, secrets, push credentials, AI credentials, and API origins.
 - Least-privilege service/DB accounts and encrypted connections are configured.
 - Alembic migration, rollback/forward plan, lint, type checks, unit/integration/security tests, Docker build, dynamic `PORT` startup, and `/health` deployment gates pass.
-- Railway uses a PostGIS-capable database service rather than the default PostgreSQL template; PostgreSQL and Redis remain private and persistent.
+- The selected provider supports and enables PostGIS and pgvector; PostgreSQL and Redis connections use TLS.
+- Railway keeps PostgreSQL and Redis private and runs Alembic as a pre-deploy command.
+- The Render/Neon/Upstash free staging option uses Neon's direct URL for Alembic, pooled URL for the API, and Upstash's `rediss://` TCP endpoint. Its cold starts and free quotas are accepted as non-production constraints.
 - Error monitoring, structured logs, request IDs, latency/database/AI/push dashboards, and alerts are active without sensitive payload logging.
 - Automated PostgreSQL backups have retention configured and a restoration drill has succeeded.
 - Security headers, reverse proxy, TLS, CORS, rate limits, and administrative session controls are reviewed.

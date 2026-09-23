@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     environment: Literal["development", "staging", "production"] = "development"
     api_v1_prefix: str = "/api/v1"
     database_url: str
+    migrations_database_url: str | None = None
     redis_url: str
     jwt_secret: SecretStr
     jwt_algorithm: Literal["HS256"] = "HS256"
@@ -25,13 +26,15 @@ class Settings(BaseSettings):
     otp_debug_code: SecretStr | None = None
     max_upload_bytes: int = Field(default=8_000_000, ge=100_000, le=20_000_000)
 
-    @field_validator("database_url")
+    @field_validator("database_url", "migrations_database_url")
     @classmethod
-    def require_postgresql(cls, value: str) -> str:
+    def require_postgresql(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if value.startswith("postgres://"):
             value = value.replace("postgres://", "postgresql://", 1)
         if not value.startswith(("postgresql://", "postgresql+psycopg://")):
-            raise ValueError("DATABASE_URL must be PostgreSQL")
+            raise ValueError("Database URLs must use PostgreSQL")
         return value.replace("postgresql://", "postgresql+psycopg://", 1)
 
     @field_validator("jwt_secret")
@@ -44,4 +47,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]
+    return Settings()
