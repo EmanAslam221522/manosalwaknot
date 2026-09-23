@@ -46,6 +46,35 @@ npm run ios          # native iOS development build
 npm run build:pwa    # web/PWA export
 ```
 
+## Local FastAPI backend
+
+The backend lives in `backend/` and uses FastAPI, PostgreSQL/PostGIS, Redis, SQLAlchemy, Alembic, and backend-only Groq access. Docker Compose supplies safe local defaults; do not reuse them outside development.
+
+```sh
+# Optional: place local overrides such as GROQ_API_KEY in the repository-root .env.
+# Never commit that file.
+docker compose up --build
+curl http://localhost:8000/health
+```
+
+The API is available at `http://localhost:8000`, OpenAPI at `http://localhost:8000/docs`, and the mobile development value should be `EXPO_PUBLIC_API_BASE_URL=http://localhost:8000` (use the host machine's LAN address on a physical device).
+
+Run backend checks from the backend directory:
+
+```sh
+cd backend
+python -m venv .venv
+. .venv/bin/activate
+pip install -e '.[dev]'
+ruff check .
+ruff format --check .
+mypy app
+pytest --cov=app --cov-fail-under=80
+alembic upgrade head
+```
+
+For a clean local database, stop the stack and explicitly remove development volumes with `docker compose down -v`, then start it again. This permanently deletes local data. Production requires externally managed secrets, HTTPS, trusted-proxy rate limiting, backups, monitoring, and an independently reviewed deployment configuration.
+
 ## Backend contract
 
 See [`docs/backend-contract.md`](docs/backend-contract.md). It lists required endpoints and server-owned guarantees. FastAPI OpenAPI remains the authoritative API specification and should be contract-tested against the Zod DTOs in `services/`.

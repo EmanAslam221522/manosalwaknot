@@ -131,6 +131,7 @@ class Session(UUIDTimestampMixin, Base):
     __tablename__ = "sessions"
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    family_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), default=uuid.uuid4, index=True)
     refresh_token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -179,6 +180,10 @@ class FoodListing(UUIDTimestampMixin, Base):
         CheckConstraint("servings_available >= 0", name="servings_available_nonnegative"),
         CheckConstraint("servings_available <= servings_total", name="servings_available_total"),
         CheckConstraint("price >= 0", name="price_nonnegative"),
+        CheckConstraint(
+            "image_url IS NULL OR image_url ~ '^https?://[^[:space:]]+$'",
+            name="image_url_absolute_http",
+        ),
         Index("ix_food_discovery", "status", "city", "pickup_end"),
     )
 
@@ -345,8 +350,11 @@ class AiConversation(UUIDTimestampMixin, Base):
 
 class AiMessage(UUIDTimestampMixin, Base):
     __tablename__ = "ai_messages"
+    __table_args__ = (UniqueConstraint("user_id", "client_message_id"),)
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ai_conversations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    reply_to_message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("ai_messages.id", ondelete="CASCADE"), unique=True)
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
     references: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
@@ -359,6 +367,8 @@ class AiAction(UUIDTimestampMixin, Base):
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ai_conversations.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    source_message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ai_messages.id", ondelete="CASCADE"), index=True)
+    result_message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("ai_messages.id", ondelete="SET NULL"))
     kind: Mapped[str] = mapped_column(String(64))
     label: Mapped[str] = mapped_column(String(160))
     summary: Mapped[str | None] = mapped_column(Text)

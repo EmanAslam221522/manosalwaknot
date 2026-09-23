@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.models import DeliveryStatus, FoodStatus, ReportStatus, ReservationStatus, Role, VerificationStatus, VerificationType
 
@@ -67,6 +67,15 @@ class LocationPreference(StrictModel):
     area: str = Field(min_length=2, max_length=160)
 
 
+class LocationCreate(StrictModel):
+    city: str = Field(min_length=2, max_length=120)
+    area: str = Field(min_length=2, max_length=160)
+    address: str = Field(min_length=3, max_length=1000)
+    latitude: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    longitude: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    pickup_instructions: str | None = Field(default=None, max_length=1000)
+
+
 class FoodDraftIn(StrictModel):
     title: str = Field(min_length=3, max_length=160)
     description: str = Field(min_length=3, max_length=3000)
@@ -102,10 +111,10 @@ class FoodSummaryOut(BaseModel):
     title: str
     provider_name: str
     provider_verified: bool
-    image_url: str | None
+    image_url: AnyHttpUrl | None
     servings_available: int
     is_free: bool
-    price: Decimal
+    price: float
     currency: str
     pickup_start: datetime
     pickup_end: datetime
@@ -168,6 +177,21 @@ class ReservationDetailOut(ReservationSummaryOut):
 class ReservationPage(BaseModel):
     items: list[ReservationSummaryOut]
     meta: PageMeta
+
+
+class DeliveryCreate(StrictModel):
+    reservation_id: UUID
+    dropoff_area: str = Field(min_length=2, max_length=160)
+    dropoff_address: str | None = Field(default=None, max_length=1000)
+    dropoff_latitude: float | None = Field(default=None, ge=-90, le=90)
+    dropoff_longitude: float | None = Field(default=None, ge=-180, le=180)
+    dropoff_instructions: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def coordinate_pair(self) -> DeliveryCreate:
+        if (self.dropoff_latitude is None) != (self.dropoff_longitude is None):
+            raise ValueError("drop-off latitude and longitude must be provided together")
+        return self
 
 
 class DeliveryTransitionIn(StrictModel):

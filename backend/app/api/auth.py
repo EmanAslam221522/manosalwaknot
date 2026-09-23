@@ -2,7 +2,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import current_user
@@ -49,12 +49,13 @@ def login_password(payload: PasswordLogin, request: Request, db: Session = Depen
 @router.post("/otp/request", status_code=status.HTTP_204_NO_CONTENT)
 def request_otp(payload: OtpRequest, request: Request, db: Session = Depends(get_db)) -> Response:
     enforce_rate_limit(request, "otp_request", 5, 900)
-    code = get_settings().otp_debug_code.get_secret_value() if get_settings().otp_debug_code else f"{secrets.randbelow(1_000_000):06d}"
+    settings = get_settings()
+    if settings.environment != "development" and settings.otp_debug_code is None:
+        raise ApiError(503, "SMS_PROVIDER_NOT_CONFIGURED", "Phone sign-in is temporarily unavailable.")
+    code = settings.otp_debug_code.get_secret_value() if settings.otp_debug_code else f"{secrets.randbelow(1_000_000):06d}"
     challenge = OtpChallenge(phone_number=payload.phone_number, code_hash=hash_opaque_token(code), expires_at=datetime.now(UTC) + timedelta(minutes=5))
     db.add(challenge)
     db.commit()
-    if get_settings().environment != "development" and get_settings().otp_debug_code is None:
-        raise ApiError(503, "SMS_PROVIDER_NOT_CONFIGURED", "Phone sign-in is temporarily unavailable.")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -85,8 +86,17 @@ def verify_otp(payload: OtpVerify, request: Request, db: Session = Depends(get_d
 def refresh(payload: RefreshRequest, request: Request, db: Session = Depends(get_db)) -> TokensOut:
     enforce_rate_limit(request, "refresh", 30, 900)
     old = db.scalar(select(UserSession).where(UserSession.refresh_token_hash == hash_opaque_token(payload.refresh_token)).with_for_update())
-    if old is None or old.revoked_at is not None or old.expires_at <= datetime.now(UTC):
+    if old is None or old.expires_at <= datetime.now(UTC):
         raise ApiError(401, "REFRESH_TOKEN_INVALID", "Please sign in again.")
+    if old.revoked_at is not None:
+        db.execute(
+            update(UserSession)
+            .where(UserSession.family_id == old.family_id, UserSession.revoked_at.is_(None))
+            .values(revoked_at=datetime.now(UTC))
+        )
+        audit(db, old.user_id, "session.refresh_reuse_detected", "session", old.id, request.state.request_id)
+        db.commit()
+        raise ApiError(401, "REFRESH_TOKEN_REUSED", "Please sign in again.")
     result = rotate_session(db, old)
     audit(db, old.user_id, "session.rotated", "session", old.id, request.state.request_id)
     db.commit()

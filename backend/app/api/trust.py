@@ -64,8 +64,24 @@ def create_handover_token(reservation_id: str, request: Request, user: User = De
         raise ApiError(404, "RESERVATION_NOT_FOUND", "This reservation was not found.")
     if reservation.status not in {ReservationStatus.CONFIRMED, ReservationStatus.READY}:
         raise ApiError(409, "HANDOVER_NOT_AVAILABLE", "Handover is not available for this reservation.")
+    db.execute(
+        select(HandoverToken)
+        .where(
+            HandoverToken.reservation_id == reservation.id,
+            HandoverToken.consumed_at.is_(None),
+        )
+        .with_for_update()
+    )
+    now = datetime.now(UTC)
+    for previous_token in db.scalars(
+        select(HandoverToken).where(
+            HandoverToken.reservation_id == reservation.id,
+            HandoverToken.consumed_at.is_(None),
+        )
+    ):
+        previous_token.consumed_at = now
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(UTC) + timedelta(minutes=get_settings().handover_token_minutes)
+    expires_at = now + timedelta(minutes=get_settings().handover_token_minutes)
     db.add(HandoverToken(reservation_id=reservation.id, token_hash=hash_opaque_token(token), expires_at=expires_at))
     audit(db, user.id, "handover_token.created", "reservation", reservation.id, request.state.request_id)
     db.commit()
@@ -74,10 +90,14 @@ def create_handover_token(reservation_id: str, request: Request, user: User = De
 
 @router.post("/handovers/confirm", response_model=HandoverConfirmOut)
 def confirm_handover(payload: HandoverConfirm, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> HandoverConfirmOut:
-    record = db.scalar(select(HandoverToken).where(HandoverToken.token_hash == hash_opaque_token(payload.token)).with_for_update())
+    token_hash = hash_opaque_token(payload.token)
+    candidate = db.scalar(select(HandoverToken).where(HandoverToken.token_hash == token_hash))
+    if candidate is None:
+        raise ApiError(409, "HANDOVER_TOKEN_INVALID", "This handover code is invalid or has expired.")
+    reservation = db.scalar(select(Reservation).options(selectinload(Reservation.food)).where(Reservation.id == candidate.reservation_id).with_for_update())
+    record = db.scalar(select(HandoverToken).where(HandoverToken.id == candidate.id).with_for_update())
     if record is None or record.consumed_at is not None or record.expires_at <= datetime.now(UTC):
         raise ApiError(409, "HANDOVER_TOKEN_INVALID", "This handover code is invalid or has expired.")
-    reservation = db.scalar(select(Reservation).options(selectinload(Reservation.food)).where(Reservation.id == record.reservation_id).with_for_update())
     if reservation is None or reservation.food.provider_id != user.id:
         raise ApiError(404, "RESERVATION_NOT_FOUND", "This reservation was not found.")
     if reservation.status not in {ReservationStatus.CONFIRMED, ReservationStatus.READY}:

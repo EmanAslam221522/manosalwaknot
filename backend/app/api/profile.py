@@ -4,10 +4,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_user
 from app.core.database import get_db
-from app.core.errors import ApiError
 from app.domain import user_out
 from app.models import Location, User
-from app.schemas import LocationPreference, UserOut
+from app.schemas import LocationCreate, LocationPreference, UserOut
 
 router = APIRouter(prefix="/users", tags=["profiles"])
 
@@ -26,14 +25,16 @@ def list_locations(user: User = Depends(current_user), db: Session = Depends(get
 
 
 @router.post("/me/locations")
-def create_location(payload: dict[str, object], user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, object]:
-    required = ("city", "area", "address", "latitude", "longitude")
-    if any(key not in payload for key in required):
-        raise ApiError(422, "INVALID_LOCATION", "City, area, address, latitude, and longitude are required.")
-    try:
-        location = Location(owner_id=user.id, city=str(payload["city"]), area=str(payload["area"]), address=str(payload["address"]), latitude=float(payload["latitude"]), longitude=float(payload["longitude"]), pickup_instructions=str(payload["pickup_instructions"]) if payload.get("pickup_instructions") else None)
-    except (TypeError, ValueError) as exc:
-        raise ApiError(422, "INVALID_LOCATION", "The pickup location is invalid.") from exc
+def create_location(payload: LocationCreate, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, object]:
+    location = Location(
+        owner_id=user.id,
+        city=payload.city,
+        area=payload.area,
+        address=payload.address,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        pickup_instructions=payload.pickup_instructions,
+    )
     db.add(location)
     db.commit()
     db.refresh(location)

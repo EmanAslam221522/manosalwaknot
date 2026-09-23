@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -21,28 +21,82 @@ def food_load() -> tuple[object, object]:
 
 
 @router.get("", response_model=FoodPage)
-def list_food(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100), search: str | None = Query(None, max_length=120), is_free: bool | None = None, category_id: UUID | None = None, dietary: str | None = Query(None, max_length=80), pickup_before: datetime | None = None, lat: float | None = Query(None, ge=-90, le=90), lng: float | None = Query(None, ge=-180, le=180), radius_km: float | None = Query(None, gt=0, le=100), db: Session = Depends(get_db), _: User = Depends(current_user)) -> FoodPage:
+def list_food(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None, alias="q", max_length=120),
+    city: str | None = Query(None, max_length=120),
+    area: str | None = Query(None, max_length=160),
+    price: str | None = Query(None, pattern="^(FREE|DISCOUNTED)$"),
+    category_id: UUID | None = None,
+    dietary: str | None = Query(None, alias="dietary_type", max_length=80),
+    pickup_after: datetime | None = None,
+    pickup_before: datetime | None = None,
+    delivery_available: bool | None = None,
+    ending_soon: bool | None = None,
+    lat: float | None = Query(None, ge=-90, le=90),
+    lng: float | None = Query(None, ge=-180, le=180),
+    radius_km: float | None = Query(None, gt=0, le=100),
+    db: Session = Depends(get_db),
+    _: User = Depends(current_user),
+) -> FoodPage:
     if (lat is None) != (lng is None) or (radius_km is not None and lat is None):
         raise ApiError(422, "INVALID_LOCATION_FILTER", "Latitude and longitude must be provided together.")
-    filters = [FoodListing.status == FoodStatus.PUBLISHED, FoodListing.servings_available > 0, FoodListing.expires_at > datetime.now(UTC)]
+    now = datetime.now(UTC)
+    filters = [
+        FoodListing.status == FoodStatus.PUBLISHED,
+        FoodListing.servings_available > 0,
+        FoodListing.expires_at > now,
+    ]
     if search:
         term = f"%{search}%"
-        filters.append(or_(FoodListing.title.ilike(term), FoodListing.description.ilike(term), FoodListing.area.ilike(term)))
-    if is_free is not None:
-        filters.append(FoodListing.is_free == is_free)
+        filters.append(
+            or_(
+                FoodListing.title.ilike(term),
+                FoodListing.description.ilike(term),
+                FoodListing.area.ilike(term),
+            )
+        )
+    if city:
+        filters.append(FoodListing.city.ilike(city))
+    if area:
+        filters.append(FoodListing.area.ilike(area))
+    if price == "FREE":
+        filters.append(FoodListing.is_free.is_(True))
+    elif price == "DISCOUNTED":
+        filters.append(FoodListing.is_free.is_(False))
     if category_id:
         filters.append(FoodListing.category_id == category_id)
     if dietary:
         filters.append(FoodListing.dietary_information.contains([dietary]))
+    if pickup_after:
+        filters.append(FoodListing.pickup_end >= pickup_after)
     if pickup_before:
         filters.append(FoodListing.pickup_start <= pickup_before)
+    if delivery_available is not None:
+        filters.append(FoodListing.delivery_available == delivery_available)
+    if ending_soon:
+        filters.append(FoodListing.pickup_end <= now + timedelta(hours=2))
     if radius_km is not None and lat is not None and lng is not None:
-        point = cast(func.ST_SetSRID(func.ST_MakePoint(FoodListing.longitude, FoodListing.latitude), 4326), Geography)
+        point = cast(
+            func.ST_SetSRID(func.ST_MakePoint(FoodListing.longitude, FoodListing.latitude), 4326),
+            Geography,
+        )
         origin = cast(func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326), Geography)
         filters.append(func.ST_DWithin(point, origin, radius_km * 1000))
     total = db.scalar(select(func.count()).select_from(FoodListing).where(*filters)) or 0
-    foods = db.scalars(select(FoodListing).options(*food_load()).where(*filters).order_by(FoodListing.pickup_end).offset((page - 1) * page_size).limit(page_size)).all()
-    return FoodPage(items=[food_summary(food, lat, lng) for food in foods], meta=pagination(total, page, page_size))
+    foods = db.scalars(
+        select(FoodListing)
+        .options(*food_load())
+        .where(*filters)
+        .order_by(FoodListing.pickup_end)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return FoodPage(
+        items=[food_summary(food, lat, lng) for food in foods],
+        meta=pagination(total, page, page_size),
+    )
 
 
 @router.get("/categories")

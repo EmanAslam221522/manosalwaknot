@@ -9,7 +9,7 @@ from app.core.database import get_db
 from app.core.errors import ApiError
 from app.domain import audit, pagination
 from app.models import DeliveryEvent, DeliveryStatus, DeliveryTask, FoodListing, Notification, Reservation, ReservationStatus, Role, User
-from app.schemas import CoordinateOut, DeliveryDetailOut, DeliveryEventOut, DeliveryPage, DeliveryPointOut, DeliverySummaryOut, DeliveryTransitionIn
+from app.schemas import CoordinateOut, DeliveryCreate, DeliveryDetailOut, DeliveryEventOut, DeliveryPage, DeliveryPointOut, DeliverySummaryOut, DeliveryTransitionIn
 
 router = APIRouter(prefix="/deliveries", tags=["deliveries"])
 
@@ -58,20 +58,31 @@ def my_deliveries(status_filter: str = Query("active", alias="status", pattern="
 
 
 @router.post("", response_model=DeliveryDetailOut, status_code=status.HTTP_201_CREATED)
-def create_delivery(payload: dict[str, object], request: Request, user: User = Depends(require_roles(Role.FOOD_PROVIDER, Role.ORGANIZATION)), db: Session = Depends(get_db)) -> DeliveryDetailOut:
-    try:
-        reservation_id = UUID(str(payload["reservation_id"]))
-        dropoff_area = str(payload["dropoff_area"])
-    except (KeyError, ValueError) as exc:
-        raise ApiError(422, "INVALID_DELIVERY", "Reservation and drop-off area are required.") from exc
-    reservation = db.scalar(select(Reservation).options(selectinload(Reservation.food).selectinload(FoodListing.location), selectinload(Reservation.food).selectinload(FoodListing.provider)).where(Reservation.id == reservation_id))
+def create_delivery(payload: DeliveryCreate, request: Request, user: User = Depends(require_roles(Role.FOOD_PROVIDER, Role.ORGANIZATION)), db: Session = Depends(get_db)) -> DeliveryDetailOut:
+    reservation = db.scalar(
+        select(Reservation)
+        .options(
+            selectinload(Reservation.food).selectinload(FoodListing.location),
+            selectinload(Reservation.food).selectinload(FoodListing.provider),
+        )
+        .where(Reservation.id == payload.reservation_id)
+        .with_for_update()
+    )
     if reservation is None or reservation.food.provider_id != user.id:
         raise ApiError(404, "RESERVATION_NOT_FOUND", "This reservation was not found.")
     if reservation.status not in {ReservationStatus.CONFIRMED, ReservationStatus.READY}:
         raise ApiError(409, "DELIVERY_NOT_AVAILABLE", "A delivery cannot be created for this reservation.")
     if db.scalar(select(DeliveryTask.id).where(DeliveryTask.reservation_id == reservation.id)):
         raise ApiError(409, "DELIVERY_ALREADY_EXISTS", "A delivery already exists for this reservation.")
-    task = DeliveryTask(reservation_id=reservation.id, pickup_area=reservation.food.area, dropoff_area=dropoff_area, dropoff_address=str(payload.get("dropoff_address")) if payload.get("dropoff_address") else None, dropoff_latitude=float(payload["dropoff_latitude"]) if payload.get("dropoff_latitude") is not None else None, dropoff_longitude=float(payload["dropoff_longitude"]) if payload.get("dropoff_longitude") is not None else None, dropoff_instructions=str(payload.get("dropoff_instructions")) if payload.get("dropoff_instructions") else None)
+    task = DeliveryTask(
+        reservation_id=reservation.id,
+        pickup_area=reservation.food.area,
+        dropoff_area=payload.dropoff_area,
+        dropoff_address=payload.dropoff_address,
+        dropoff_latitude=payload.dropoff_latitude,
+        dropoff_longitude=payload.dropoff_longitude,
+        dropoff_instructions=payload.dropoff_instructions,
+    )
     db.add(task)
     db.flush()
     db.add(DeliveryEvent(delivery_id=task.id, actor_id=user.id, new_state=DeliveryStatus.AVAILABLE, request_id=request.state.request_id, actor_label=user.display_name))
@@ -92,9 +103,15 @@ def get_delivery(delivery_id: UUID, user: User = Depends(current_user), db: Sess
 
 @router.post("/{delivery_id}/accept", response_model=DeliveryDetailOut)
 def accept_delivery(delivery_id: UUID, request: Request, user: User = Depends(require_roles(Role.VOLUNTEER)), db: Session = Depends(get_db)) -> DeliveryDetailOut:
-    task = db.scalar(select(DeliveryTask).options(*load_task()).where(DeliveryTask.id == delivery_id).with_for_update())
-    if task is None:
+    candidate = db.scalar(select(DeliveryTask).where(DeliveryTask.id == delivery_id))
+    if candidate is None:
         raise ApiError(404, "DELIVERY_NOT_FOUND", "This delivery task was not found.")
+    reservation = db.scalar(select(Reservation).where(Reservation.id == candidate.reservation_id).with_for_update())
+    task = db.scalar(select(DeliveryTask).options(*load_task()).where(DeliveryTask.id == delivery_id).with_for_update())
+    if task is None or reservation is None:
+        raise ApiError(404, "DELIVERY_NOT_FOUND", "This delivery task was not found.")
+    if reservation.status not in {ReservationStatus.CONFIRMED, ReservationStatus.READY}:
+        raise ApiError(409, "DELIVERY_NOT_AVAILABLE", "This delivery task is no longer available.")
     if task.status != DeliveryStatus.AVAILABLE or task.volunteer_id is not None:
         raise ApiError(409, "DELIVERY_ALREADY_ACCEPTED", "This delivery task is no longer available.")
     task.volunteer_id, task.status = user.id, DeliveryStatus.ACCEPTED
@@ -106,9 +123,15 @@ def accept_delivery(delivery_id: UUID, request: Request, user: User = Depends(re
 
 @router.post("/{delivery_id}/transitions", response_model=DeliveryDetailOut)
 def transition_delivery(delivery_id: UUID, payload: DeliveryTransitionIn, request: Request, user: User = Depends(require_roles(Role.VOLUNTEER)), db: Session = Depends(get_db)) -> DeliveryDetailOut:
-    task = db.scalar(select(DeliveryTask).options(*load_task()).where(DeliveryTask.id == delivery_id).with_for_update())
-    if task is None or task.volunteer_id != user.id:
+    candidate = db.scalar(select(DeliveryTask).where(DeliveryTask.id == delivery_id))
+    if candidate is None:
         raise ApiError(404, "DELIVERY_NOT_FOUND", "This delivery task was not found.")
+    reservation = db.scalar(select(Reservation).where(Reservation.id == candidate.reservation_id).with_for_update())
+    task = db.scalar(select(DeliveryTask).options(*load_task()).where(DeliveryTask.id == delivery_id).with_for_update())
+    if task is None or reservation is None or task.volunteer_id != user.id:
+        raise ApiError(404, "DELIVERY_NOT_FOUND", "This delivery task was not found.")
+    if reservation.status in {ReservationStatus.CANCELLED, ReservationStatus.EXPIRED, ReservationStatus.NO_SHOW, ReservationStatus.DISPUTED, ReservationStatus.COMPLETED}:
+        raise ApiError(409, "RESERVATION_NOT_DELIVERABLE", "This reservation can no longer be delivered.")
     if NEXT_STATUS.get(task.status) != payload.status:
         raise ApiError(409, "INVALID_DELIVERY_TRANSITION", "That delivery update is not allowed.")
     previous, task.status = task.status, payload.status

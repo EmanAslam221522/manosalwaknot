@@ -7,10 +7,9 @@ from app.core.errors import ApiError
 _redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
 
 
-def enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int) -> None:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    client = forwarded.split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
-    key = f"rate:{scope}:{client}"
+def enforce_rate_limit(request: Request, scope: str, limit: int, window_seconds: int, subject: str | None = None) -> None:
+    client = request.client.host if request.client else "unknown"
+    key = f"rate:{scope}:{subject or client}"
     try:
         count = _redis.incr(key)
         if count == 1:

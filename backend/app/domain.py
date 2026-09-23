@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.security import create_access_token, hash_opaque_token, new_opaque_token
-from app.models import AuditLog, FoodListing, Reservation, Role, Session as UserSession, User
+from app.models import AuditLog, FoodListing, Reservation, ReservationStatus, Role, Session as UserSession, User
 from app.schemas import FoodDetailOut, FoodSummaryOut, PageMeta, ReservationDetailOut, ReservationEventOut, ReservationSummaryOut, SessionOut, TokensOut, UserOut
 
 
@@ -26,7 +26,7 @@ def issue_session(db: Session, user: User) -> SessionOut:
 
 def rotate_session(db: Session, old: UserSession) -> TokensOut:
     token = new_opaque_token()
-    replacement = UserSession(user_id=old.user_id, refresh_token_hash=hash_opaque_token(token), expires_at=datetime.now(UTC) + timedelta(days=get_settings().refresh_token_days))
+    replacement = UserSession(user_id=old.user_id, family_id=old.family_id, refresh_token_hash=hash_opaque_token(token), expires_at=datetime.now(UTC) + timedelta(days=get_settings().refresh_token_days))
     db.add(replacement)
     db.flush()
     old.revoked_at = datetime.now(UTC)
@@ -55,13 +55,28 @@ def can_view_exact_food(user: User, food: FoodListing, db: Session) -> bool:
     roles = {entry.role for entry in user.roles}
     if food.provider_id == user.id or roles.intersection({Role.ADMIN, Role.SUPER_ADMIN}):
         return True
-    count = db.scalar(select(func.count()).select_from(Reservation).where(Reservation.food_listing_id == food.id, Reservation.recipient_id == user.id)) or 0
+    active_states = {
+        ReservationStatus.PENDING,
+        ReservationStatus.CONFIRMED,
+        ReservationStatus.READY,
+        ReservationStatus.PICKED_UP,
+        ReservationStatus.DELIVERED,
+    }
+    count = db.scalar(
+        select(func.count())
+        .select_from(Reservation)
+        .where(
+            Reservation.food_listing_id == food.id,
+            Reservation.recipient_id == user.id,
+            Reservation.status.in_(active_states),
+        )
+    ) or 0
     return count > 0
 
 
 def food_summary(food: FoodListing, lat: float | None = None, lng: float | None = None) -> FoodSummaryOut:
     distance = distance_km(lat, lng, food.latitude, food.longitude) if lat is not None and lng is not None else None
-    return FoodSummaryOut(id=food.id, title=food.title, provider_name=food.provider.display_name, provider_verified=food.provider.is_verified, image_url=food.image_url, servings_available=food.servings_available, is_free=food.is_free, price=food.price, currency=food.currency, pickup_start=food.pickup_start, pickup_end=food.pickup_end, area=food.area, approximate_distance_km=distance, status=food.status, dietary_information=food.dietary_information)
+    return FoodSummaryOut(id=food.id, title=food.title, provider_name=food.provider.display_name, provider_verified=food.provider.is_verified, image_url=food.image_url, servings_available=food.servings_available, is_free=food.is_free, price=float(food.price), currency=food.currency, pickup_start=food.pickup_start, pickup_end=food.pickup_end, area=food.area, approximate_distance_km=distance, status=food.status, dietary_information=food.dietary_information)
 
 
 def food_detail(food: FoodListing, exact: bool, lat: float | None = None, lng: float | None = None) -> FoodDetailOut:

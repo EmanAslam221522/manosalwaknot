@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -21,7 +22,12 @@ def current_user(
         raise ApiError(401, "AUTHENTICATION_REQUIRED", "Please sign in to continue.")
     user_id, session_id = decode_access_token(credentials.credentials)
     user_session = db.get(UserSession, session_id)
-    if user_session is None or user_session.user_id != user_id or user_session.revoked_at is not None:
+    if (
+        user_session is None
+        or user_session.user_id != user_id
+        or user_session.revoked_at is not None
+        or user_session.expires_at <= datetime.now(UTC)
+    ):
         raise ApiError(401, "SESSION_REVOKED", "Your session is no longer valid.")
     user = db.scalar(select(User).options(selectinload(User.roles)).where(User.id == user_id))
     if user is None or not user.is_active or user.deleted_at is not None:

@@ -25,4 +25,8 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False
 
 def get_db() -> Generator[Session, None, None]:
     with SessionLocal() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            session.rollback()
+            raise

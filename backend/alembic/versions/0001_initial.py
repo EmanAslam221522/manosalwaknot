@@ -17,7 +17,6 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS postgis")
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     Base.metadata.create_all(bind=op.get_bind())
     op.execute(
         "CREATE INDEX IF NOT EXISTS ix_food_location_gist ON food_listings "
