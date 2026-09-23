@@ -18,14 +18,19 @@ import { Uniwind } from 'uniwind';
 import {
   ErrorBoundary as ExpoErrorBoundary,
   type ErrorBoundaryProps,
+  Redirect,
   SplashScreen,
   Stack,
+  useSegments,
 } from 'expo-router';
 
 import { initPostHog } from '@/lib/posthog';
 import { registerServiceWorker } from '@/lib/registerServiceWorker';
 import { reportErrorToParent } from '@/lib/reportPreviewError';
 import { InstallPrompt } from '@/components/InstallPrompt';
+import { AppProviders } from '@/components/providers/AppProviders';
+import { StateView } from '@/components/ui/StateView';
+import { useAuthStore } from '@/hooks/auth/useAuthStore';
 
 /**
  * Custom ErrorBoundary that reports React render errors to the parent window (Bilt preview iframe)
@@ -47,6 +52,30 @@ export { ErrorBoundary };
 Uniwind.setTheme('light');
 
 void SplashScreen.preventAutoHideAsync();
+
+function AuthenticatedNavigator() {
+  const status = useAuthStore((state) => state.status);
+  const segments = useSegments();
+  const inAuthGroup = segments[0] === 'auth';
+
+  if (status === 'initializing') {
+    return <StateView title="Restoring your secure session…" kind="loading" />;
+  }
+  if (status === 'unauthenticated' && !inAuthGroup) {
+    return <Redirect href="/auth/sign-in" />;
+  }
+  if (status === 'authenticated' && inAuthGroup) {
+    return <Redirect href="/" />;
+  }
+
+  return (
+    <Stack>
+      <Stack.Screen name="(tabs)" options={{ title: 'ManOSalwaKnot', headerShown: false }} />
+      <Stack.Screen name="auth" options={{ headerShown: false }} />
+      <Stack.Screen name="mano" options={{ headerShown: false }} />
+    </Stack>
+  );
+}
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
@@ -140,12 +169,12 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <HeroUINativeProvider>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ title: 'Habits', headerShown: false }} />
-        </Stack>
-        <InstallPrompt />
-      </HeroUINativeProvider>
+      <AppProviders>
+        <HeroUINativeProvider>
+          <AuthenticatedNavigator />
+          <InstallPrompt />
+        </HeroUINativeProvider>
+      </AppProviders>
     </GestureHandlerRootView>
   );
 }

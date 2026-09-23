@@ -1,158 +1,57 @@
-# Welcome to your Bilt project
+# ManOSalwaKnot mobile client
 
-[![Built with Bilt](https://img.shields.io/endpoint?url=https%3A%2F%2Fapp.bilt.me%2Fapi%2Fbadge)](https://bilt.me)
+Production-oriented React Native and Expo client for the ManOSalwaKnot food-rescue platform. The app is an HTTPS client for a separate FastAPI service; it never connects directly to PostgreSQL, Redis, object storage, maps administration APIs, or an AI provider.
 
-## Project info
+## Architecture
 
-**Project URL**: https://app.bilt.me/agent/ce39d5ff-a181-4748-953c-ab7baf68257a
+- Expo Router and TypeScript
+- HeroUI Native and Uniwind design system
+- TanStack Query for server state
+- Zod validation at API boundaries
+- Expo SecureStore for native session tokens; web sessions are memory-only
+- Centralized `/api/v1` client with timeout, cancellation, safe GET retries, rotating refresh tokens, normalized errors, and request correlation IDs
+- Server-authoritative roles, quantities, state transitions, QR handover, verification, impact, and Mano actions
 
-**Project ID**: `ce39d5ff-a181-4748-953c-ab7baf68257a`
+No food listing, reservation, impact number, or organization is hardcoded as production data.
 
-## How can I edit this app?
+## Setup
 
-There are several ways of editing your application.
-
-**Use Bilt**
-
-Simply visit your [Bilt Project](https://app.bilt.me/agent/ce39d5ff-a181-4748-953c-ab7baf68257a) and start sending messages. Describe what you want to change, add, or fix in natural language.
-
-Changes made via Bilt are instant - just send a message and your app updates.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can export the source code from Bilt and make changes directly.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+Requirements: Node.js 20.19.4 or newer and npm 10. Native development also requires the Android/iOS platform toolchain or a Bilt-managed development build.
 
 ```sh
-# Step 1: Export and clone your Bilt project.
-# (Download source from Bilt or connect to your git repo)
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm install
-
-# Step 4: Start the Expo development server.
+cp .env.example .env.local
+npm ci
 npx expo start
 ```
 
-Scan the QR code with Expo Go on your phone to see your app running locally.
+Set `EXPO_PUBLIC_API_BASE_URL` to the FastAPI origin. Public Expo variables are embedded in the client bundle and must never contain database credentials, JWT secrets, Groq keys, private maps keys, storage keys, or push-service secrets.
 
-**Edit a file directly in GitHub**
+Configured native modules include SecureStore, foreground location, camera/QR scanning, microphone recording, notifications, and native maps. Rebuild the native application after plugin or permission changes. Expo Go should not be treated as the production-capability test environment.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Environments
 
-**Use GitHub Codespaces**
+`EXPO_PUBLIC_APP_ENV` accepts only `development`, `staging`, or `production`. Staging and production require HTTPS. Use separate API origins and data stores for every environment.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Optional PostHog web analytics uses `EXPO_PUBLIC_POSTHOG_KEY` and `EXPO_PUBLIC_POSTHOG_HOST`. URL-query configuration and session recording are disabled. Leave both unset until privacy, consent, retention, and data-scrubbing requirements are approved.
 
-## What technologies are used for this project?
-
-This project is built with:
-
-- React Native
-- Expo
-- TypeScript
-- AsyncStorage (local data persistence)
-- Expo Router (navigation)
-
-All generated automatically by Bilt from your natural language instructions.
-
-## How can I test this project?
-
-**Option 1: Preview in Bilt (Recommended)**
-
-Open your [Bilt Project](https://app.bilt.me/agent/ce39d5ff-a181-4748-953c-ab7baf68257a) and use the built-in preview.
-
-Open **Deploy & Share** to create a revocable preview link or build the app on your iPhone.
-
-**Option 2: Run Locally**
+## Commands
 
 ```sh
-npm install
-npx expo start
+npm test             # mobile boundary unit tests
+npm run lint         # lint and TypeScript checks
+npm run expo-check   # Expo dependency compatibility
+npm run verify       # complete CI verification
+npm run android      # native Android development build
+npm run ios          # native iOS development build
+npm run build:pwa    # web/PWA export
 ```
 
-Then scan the QR code with Expo Go.
+## Backend contract
 
-## How can I deploy this project?
+See [`docs/backend-contract.md`](docs/backend-contract.md). It lists required endpoints and server-owned guarantees. FastAPI OpenAPI remains the authoritative API specification and should be contract-tested against the Zod DTOs in `services/`.
 
-Open your [Bilt Project](https://app.bilt.me/agent/ce39d5ff-a181-4748-953c-ab7baf68257a), select **Deploy & Share**, then choose **Publish to web**, **Release on App Store**, or **Release on Play Store**.
+Provider listing creation remains intentionally unavailable in the UI until the backend supplies authenticated category and saved-location metadata endpoints. The typed draft and publish service boundaries already exist; the client does not invent category/location IDs or replace missing backend data with fixtures.
 
-### Deploy with Bilt
+## Release gate
 
-Publishing to web creates a public, installable web app at its own URL. Bilt also guides you through preparing native releases for the App Store and Play Store.
-
-## How can I make changes to my app?
-
-**Via Bilt (Easiest)**
-
-Visit your [Bilt Project](https://app.bilt.me/agent/ce39d5ff-a181-4748-953c-ab7baf68257a) and send a message describing what you want:
-
-- "Add a dark mode toggle"
-- "Change the button color to blue"
-- "Add a new screen for user settings"
-- "Fix the navigation bar spacing"
-
-Bilt understands natural language and updates your app automatically.
-
-**Via Code**
-
-Export the source, make changes in your IDE, and test locally with `npx expo start`.
-
-## Can I use this with the MCP protocol?
-
-Yes! Bilt is available as a remote MCP server at `https://mcp.bilt.me/mcp`.
-
-Connect any MCP-compatible AI agent (Claude Desktop, OpenClaw, etc.) to programmatically build and modify mobile apps.
-
-**Example MCP integration:**
-
-```json
-{
-  "mcpServers": {
-    "bilt": {
-      "transport": {
-        "type": "sse",
-        "url": "https://mcp.bilt.me/mcp/sse",
-        "headers": {
-          "Authorization": "Bearer YOUR_API_KEY"
-        }
-      }
-    }
-  }
-}
-```
-
-Read more:
-
-- [Bilt MCP Documentation](https://bilt.me/docs)
-- [MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.buildingapplications%2Fmcp/versions/latest)
-
-## Need help?
-
-- 📚 [Bilt Documentation](https://bilt.me/docs)
-- 💬 [Discord Community](https://discord.gg/3FqNgmSYdZ)
-- 🐦 [Twitter Updates](https://twitter.com/biltmeanapp)
-- 📧 Email: support@bilt.me
-
----
-
-<div align="center">
-
-**Built by AI. No code required.** ✨
-
-[Try Bilt](https://bilt.me) • [View Docs](https://bilt.me/docs) • [Docs MCP Server](https://bilt.me/docs/mcp)
-
-</div>
+See [`docs/release-checklist.md`](docs/release-checklist.md). A clean mobile build is not sufficient for production: backend authorization, reservation concurrency, replay-safe QR handover, notifications, monitoring, backups, and security tests must pass in staging first.
