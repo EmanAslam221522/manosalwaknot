@@ -43,7 +43,7 @@ export default function LocationSelectScreen() {
     <Screen title="Location and privacy">
       <Card className="gap-3 p-4">
         <View className="flex-row items-center gap-3">
-          <LocateFixed size={24} color={accent} accessibilityElementsHidden />
+          <LocateFixed size={24} color={accent} />
           <Typography.Heading type="h4" className="flex-1">
             Use current location
           </Typography.Heading>

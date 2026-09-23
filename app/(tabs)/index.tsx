@@ -35,7 +35,7 @@ export default function HomeScreen() {
 
       <Card className="flex-row items-center gap-3 p-4">
         <View className="bg-accent-soft h-11 w-11 items-center justify-center rounded-2xl">
-          <MapPin size={22} color={accent} accessibilityElementsHidden />
+          <MapPin size={22} color={accent} />
         </View>
         <View className="flex-1">
           <Typography.Paragraph type="body-xs" color="muted">

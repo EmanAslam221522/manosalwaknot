@@ -56,7 +56,7 @@ export function FoodCard({
           </View>
           <View className="gap-1.5">
             <View className="flex-row items-center gap-2">
-              <MapPin size={16} color="#5f6f64" accessibilityElementsHidden />
+              <MapPin size={16} color="#5f6f64" />
               <Typography.Paragraph type="body-sm" color="muted">
                 {listing.area} · {formatDistance(listing.approximateDistanceKm)}
               </Typography.Paragraph>
