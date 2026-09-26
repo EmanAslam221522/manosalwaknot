@@ -91,7 +91,7 @@ export default function SignInScreen() {
 
   return (
     <Screen>
-      <View className="flex-1 justify-center gap-6 py-8">
+      <View className="w-full max-w-md flex-1 justify-center gap-6 self-center py-8">
         <View className="items-center gap-3">
           <View className="bg-accent-soft h-16 w-16 items-center justify-center rounded-3xl">
             <HandHeart color={accent} size={34} />
