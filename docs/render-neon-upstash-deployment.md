@@ -41,7 +41,9 @@ The URLs can start with `postgresql://`; the backend normalizes them to the psyc
 
 Leave `OTP_DEBUG_CODE` unset. `ENVIRONMENT=staging` and the Groq model are defined by the Blueprint.
 
-On the Free plan, the start command runs `alembic upgrade head` before Uvicorn because Render pre-deploy commands and one-off jobs require paid compute. This is acceptable for a one-instance demo service, not a production rollout strategy.
+Keep the current Render health check at `/health`. In staging, it reports `status: degraded` but remains available if Redis is temporarily unavailable, so a bad Redis setting does not hide an otherwise healthy API. Production remains fail-closed. Rate limiting also degrades open in staging only.
+
+On the Free plan, the start command runs `alembic upgrade head` with bounded retries before Uvicorn because Render pre-deploy commands and one-off jobs require paid compute. This is acceptable for a one-instance demo service, not a production rollout strategy.
 
 ## 4. Verify the API
 

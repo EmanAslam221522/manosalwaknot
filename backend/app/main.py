@@ -3,8 +3,9 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
+from starlette.middleware.base import RequestResponseEndpoint
 
 from app.api import admin, auth, deliveries, food, mano, notifications, profile, reservations, trust
 from app.core.config import get_settings
@@ -33,7 +34,9 @@ if settings.cors_origins:
 
 
 @app.middleware("http")
-async def request_context(request: Request, call_next):
+async def request_context(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     request_id = request.headers.get("x-client-request-id") or str(uuid4())
     request.state.request_id = request_id[:128]
     response = await call_next(request)
@@ -50,11 +53,24 @@ async def handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    fields = [{"field": ".".join(str(value) for value in error["loc"]), "message": error["msg"]} for error in exc.errors()]
+async def validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    fields = [
+        {
+            "field": ".".join(str(value) for value in error["loc"]),
+            "message": error["msg"],
+        }
+        for error in exc.errors()
+    ]
     return api_error_handler(
         request,
-        ApiError(422, "VALIDATION_ERROR", "Please check the submitted information.", {"fields": fields}),
+        ApiError(
+            422,
+            "VALIDATION_ERROR",
+            "Please check the submitted information.",
+            {"fields": fields},
+        ),
     )
 
 
@@ -62,9 +78,31 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 def health() -> dict[str, str]:
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
-    check_redis()
-    return {"status": "ok", "database": "ok", "redis": "ok"}
+
+    redis_available = check_redis()
+    if not redis_available and settings.environment == "production":
+        raise ApiError(
+            503,
+            "REDIS_UNAVAILABLE",
+            "The service is temporarily unavailable.",
+        )
+
+    return {
+        "status": "ok" if redis_available else "degraded",
+        "database": "ok",
+        "redis": "ok" if redis_available else "unavailable",
+    }
 
 
-for router in (auth.router, profile.router, food.router, reservations.router, trust.router, admin.router, notifications.router, deliveries.router, mano.router):
-    app.include_router(router, prefix="/api/v1")
+for router in (
+    auth.router,
+    profile.router,
+    food.router,
+    reservations.router,
+    trust.router,
+    admin.router,
+    notifications.router,
+    deliveries.router,
+    mano.router,
+):
+    app.include_router(router, prefix=settings.api_v1_prefix)

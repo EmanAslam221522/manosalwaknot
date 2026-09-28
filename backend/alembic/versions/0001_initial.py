@@ -6,8 +6,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-from app.core.database import Base
 from app import models  # noqa: F401
+from app.core.database import Base
 
 revision: str = "0001"
 down_revision: str | None = None

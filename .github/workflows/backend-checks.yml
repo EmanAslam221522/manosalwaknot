@@ -65,10 +65,12 @@ jobs:
             --network host \
             --env ENVIRONMENT=staging \
             --env DATABASE_URL="$DATABASE_URL" \
+            --env MIGRATIONS_DATABASE_URL="$DATABASE_URL" \
             --env REDIS_URL="$REDIS_URL" \
             --env JWT_SECRET="$JWT_SECRET" \
             --env PORT=8080 \
-            manosalwaknot-api:ci
+            manosalwaknot-api:ci \
+            sh start-render.sh
           for attempt in {1..20}; do
             if curl --fail --silent http://127.0.0.1:8080/health; then
               exit 0
