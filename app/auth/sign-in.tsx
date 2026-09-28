@@ -23,6 +23,10 @@ const passwordSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters.'),
 });
 
+const registrationSchema = passwordSchema.extend({
+  displayName: z.string().trim().min(2, 'Enter your name.'),
+});
+
 const phoneSchema = z.object({
   phoneNumber: z
     .string()
@@ -36,11 +40,14 @@ const phoneSchema = z.object({
 });
 
 type PasswordValues = z.infer<typeof passwordSchema>;
+type RegistrationValues = z.infer<typeof registrationSchema>;
 type PhoneValues = z.infer<typeof phoneSchema>;
 type SignInMode = 'phone' | 'password';
+type EmailMode = 'signIn' | 'register';
 
 export default function SignInScreen() {
-  const [mode, setMode] = useState<SignInMode>('phone');
+  const [mode, setMode] = useState<SignInMode>('password');
+  const [emailMode, setEmailMode] = useState<EmailMode>('signIn');
   const [otpRequested, setOtpRequested] = useState(false);
   const accent = useThemeColor('accent');
   const completeSession = useAuthStore((state) => state.completeSession);
@@ -49,6 +56,10 @@ export default function SignInScreen() {
     resolver: zodResolver(passwordSchema),
     defaultValues: { email: '', password: '' },
   });
+  const registrationForm = useForm<RegistrationValues>({
+    resolver: zodResolver(registrationSchema),
+    defaultValues: { displayName: '', email: '', password: '' },
+  });
   const phoneForm = useForm<PhoneValues>({
     resolver: zodResolver(phoneSchema),
     defaultValues: { phoneNumber: '+92', otp: '' },
@@ -56,6 +67,13 @@ export default function SignInScreen() {
 
   const signInMutation = useMutation({
     mutationFn: (input: PasswordValues) => authService.signInWithPassword(input),
+    onSuccess: async (session) => {
+      await completeSession(session);
+      router.replace('/');
+    },
+  });
+  const registrationMutation = useMutation({
+    mutationFn: (input: RegistrationValues) => authService.registerWithEmail(input),
     onSuccess: async (session) => {
       await completeSession(session);
       router.replace('/');
@@ -73,9 +91,16 @@ export default function SignInScreen() {
     },
   });
 
-  const error = signInMutation.error ?? requestOtpMutation.error ?? verifyOtpMutation.error;
+  const error =
+    signInMutation.error ??
+    registrationMutation.error ??
+    requestOtpMutation.error ??
+    verifyOtpMutation.error;
   const busy =
-    signInMutation.isPending || requestOtpMutation.isPending || verifyOtpMutation.isPending;
+    signInMutation.isPending ||
+    registrationMutation.isPending ||
+    requestOtpMutation.isPending ||
+    verifyOtpMutation.isPending;
 
   const submitPhone = phoneForm.handleSubmit((values) => {
     if (!otpRequested) {
@@ -179,6 +204,70 @@ export default function SignInScreen() {
                 />
               ) : null}
             </View>
+          ) : emailMode === 'register' ? (
+            <View className="gap-4">
+              <Controller
+                control={registrationForm.control}
+                name="displayName"
+                render={({ field, fieldState }) => (
+                  <AppTextField
+                    label="Name"
+                    value={field.value}
+                    onChangeText={field.onChange}
+                    onBlur={field.onBlur}
+                    error={fieldState.error?.message}
+                    autoComplete="name"
+                    isRequired
+                  />
+                )}
+              />
+              <Controller
+                control={registrationForm.control}
+                name="email"
+                render={({ field, fieldState }) => (
+                  <AppTextField
+                    label="Email"
+                    value={field.value}
+                    onChangeText={field.onChange}
+                    onBlur={field.onBlur}
+                    error={fieldState.error?.message}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    isRequired
+                  />
+                )}
+              />
+              <Controller
+                control={registrationForm.control}
+                name="password"
+                render={({ field, fieldState }) => (
+                  <AppTextField
+                    label="Password"
+                    value={field.value}
+                    onChangeText={field.onChange}
+                    onBlur={field.onBlur}
+                    error={fieldState.error?.message}
+                    secureTextEntry
+                    autoComplete="new-password"
+                    isRequired
+                  />
+                )}
+              />
+              <AppButton
+                label="Create account"
+                onPress={registrationForm.handleSubmit((values) =>
+                  registrationMutation.mutate(values),
+                )}
+                isLoading={busy}
+              />
+              <AppButton
+                label="Already have an account? Sign in"
+                variant="ghost"
+                onPress={() => setEmailMode('signIn')}
+                isDisabled={busy}
+              />
+            </View>
           ) : (
             <View className="gap-4">
               <Controller
@@ -218,6 +307,12 @@ export default function SignInScreen() {
                 label="Sign in"
                 onPress={passwordForm.handleSubmit((values) => signInMutation.mutate(values))}
                 isLoading={busy}
+              />
+              <AppButton
+                label="New here? Create account"
+                variant="ghost"
+                onPress={() => setEmailMode('register')}
+                isDisabled={busy}
               />
             </View>
           )}

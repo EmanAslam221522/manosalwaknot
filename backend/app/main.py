@@ -22,7 +22,18 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.environment != "production" else None,
 )
 
-if settings.cors_origins:
+if settings.environment == "staging":
+    # Staging is a public demo API. It uses bearer tokens rather than cookies,
+    # so wildcard CORS safely supports Bilt previews and the published PWA.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Client-Request-Id", "X-Idempotency-Key"],
+        expose_headers=["X-Request-Id"],
+    )
+elif settings.cors_origins:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

@@ -1,5 +1,6 @@
-const rawApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
-const rawAppEnvironment = process.env.EXPO_PUBLIC_APP_ENV?.trim();
+const DEFAULT_API_BASE_URL = 'https://manosalwaknot-api-qm97.onrender.com';
+const rawApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim() || DEFAULT_API_BASE_URL;
+const rawAppEnvironment = process.env.EXPO_PUBLIC_APP_ENV?.trim() || 'staging';
 
 export type AppEnvironment = 'development' | 'staging' | 'production';
 

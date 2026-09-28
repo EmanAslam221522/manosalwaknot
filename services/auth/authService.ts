@@ -26,6 +26,7 @@ export type AuthSession = {
 };
 
 export type PasswordSignInInput = { email: string; password: string };
+export type EmailRegistrationInput = PasswordSignInInput & { displayName: string };
 export type RequestOtpInput = { phoneNumber: string };
 export type VerifyOtpInput = { phoneNumber: string; otp: string };
 
@@ -52,6 +53,7 @@ function mapSession(payload: unknown): AuthSession {
 }
 
 export interface AuthService {
+  registerWithEmail(input: EmailRegistrationInput, signal?: AbortSignal): Promise<AuthSession>;
   signInWithPassword(input: PasswordSignInInput, signal?: AbortSignal): Promise<AuthSession>;
   requestOtp(input: RequestOtpInput, signal?: AbortSignal): Promise<void>;
   verifyOtp(input: VerifyOtpInput, signal?: AbortSignal): Promise<AuthSession>;
@@ -60,6 +62,26 @@ export interface AuthService {
 }
 
 export const authService: AuthService = {
+  async registerWithEmail(input, signal) {
+    const response = await apiRequest<{
+      display_name: string;
+      email: string;
+      password: string;
+    }>({
+      path: '/api/v1/auth/register/email',
+      method: 'POST',
+      body: {
+        display_name: input.displayName,
+        email: input.email,
+        password: input.password,
+      },
+      signal,
+      requiresAuth: false,
+      retry: false,
+    });
+    return mapSession(response.data);
+  },
+
   async signInWithPassword(input, signal) {
     const response = await apiRequest<{ email: string; password: string }>({
       path: '/api/v1/auth/login/password',
