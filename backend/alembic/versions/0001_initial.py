@@ -20,7 +20,7 @@ def upgrade() -> None:
     Base.metadata.create_all(bind=op.get_bind())
     op.execute(
         "CREATE INDEX IF NOT EXISTS ix_food_location_gist ON food_listings "
-        "USING GIST (ST_SetSRID(ST_MakePoint(longitude::double precision, latitude::double precision), 4326)::geography)"
+        "USING GIST ((ST_SetSRID(ST_MakePoint(longitude::double precision, latitude::double precision), 4326)::geography))"
     )
 
 
