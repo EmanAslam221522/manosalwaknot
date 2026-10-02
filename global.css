@@ -52,6 +52,7 @@
       --focus: var(--accent);
       --success: oklch(0.5 0.14 145);
       --warning: oklch(0.72 0.14 75);
+      --warning-foreground: oklch(0.22 0.035 145);
       --danger: oklch(0.55 0.19 28);
     }
 
@@ -66,6 +67,7 @@
       --focus: var(--accent);
       --success: oklch(0.7 0.14 145);
       --warning: oklch(0.78 0.14 75);
+      --warning-foreground: oklch(0.16 0.03 145);
       --danger: oklch(0.7 0.18 28);
     }
   }
