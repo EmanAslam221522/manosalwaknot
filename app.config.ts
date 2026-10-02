@@ -39,7 +39,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     extra: {
       appStoreAppId: process.env.BILT_APP_STORE_APP_ID,
-    },
+    }
     plugins: [
       'expo-router',
       'expo-font',
