@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -9,11 +8,11 @@ from app.api.deps import current_user
 from app.core.database import get_db
 from app.core.errors import ApiError
 from app.domain import audit, pagination, reservation_detail, reservation_summary
-from app.models import DeliveryStatus, DeliveryTask, FoodListing, FoodStatus, Notification, Reservation, ReservationEvent, ReservationStatus, Role, User
+from app.models import DeliveryStatus, DeliveryTask, FoodListing, Notification, Reservation, ReservationEvent, ReservationStatus, Role, User
+from app.reservations.service import ACTIVE_STATES, create_reservation
 from app.schemas import ReservationCreate, ReservationDetailOut, ReservationPage, ReservationSummaryOut
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
-ACTIVE_STATES = {ReservationStatus.PENDING, ReservationStatus.CONFIRMED, ReservationStatus.READY}
 
 
 def reservation_load() -> tuple[object, object]:
@@ -34,29 +33,20 @@ def list_reservations(page: int = Query(1, ge=1), page_size: int = Query(20, ge=
 
 
 @router.post("", response_model=ReservationDetailOut, status_code=status.HTTP_201_CREATED)
-def create_reservation(payload: ReservationCreate, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> ReservationDetailOut:
-    food = db.scalar(select(FoodListing).options(selectinload(FoodListing.provider), selectinload(FoodListing.location)).where(FoodListing.id == payload.food_listing_id).with_for_update())
-    now = datetime.now(UTC)
-    if food is None or food.status != FoodStatus.PUBLISHED:
-        raise ApiError(404, "FOOD_NOT_AVAILABLE", "This food is no longer available.")
-    if food.provider_id == user.id:
-        raise ApiError(409, "OWN_LISTING_RESERVATION", "You cannot reserve your own listing.")
-    if food.pickup_end <= now or food.expires_at <= now:
-        raise ApiError(409, "FOOD_EXPIRED", "This food is no longer available.")
-    if payload.quantity > food.servings_available:
-        raise ApiError(409, "RESERVATION_QUANTITY_UNAVAILABLE", "The requested quantity is no longer available.")
-    duplicate = db.scalar(select(Reservation.id).where(Reservation.food_listing_id == food.id, Reservation.recipient_id == user.id, Reservation.status.in_(ACTIVE_STATES)))
-    if duplicate:
-        raise ApiError(409, "ACTIVE_RESERVATION_EXISTS", "You already have an active reservation for this listing.")
-    food.servings_available -= payload.quantity
-    reservation = Reservation(recipient_id=user.id, food_listing_id=food.id, quantity=payload.quantity, status=ReservationStatus.CONFIRMED, pickup_address=food.location.address, handover_instructions=food.location.pickup_instructions)
-    db.add(reservation)
-    db.flush()
-    event = ReservationEvent(reservation_id=reservation.id, actor_id=user.id, new_state=ReservationStatus.CONFIRMED, request_id=request.state.request_id, actor_label=user.display_name)
-    db.add(event)
-    db.flush()
-    db.add(Notification(user_id=food.provider_id, type="reservation_confirmed", title="New reservation", body=f"{payload.quantity} servings of {food.title} were reserved.", route=f"/reservations/{reservation.id}"))
-    audit(db, user.id, "reservation.created", "reservation", reservation.id, request.state.request_id, {"quantity": payload.quantity})
+def post_reservation(
+    payload: ReservationCreate,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ReservationDetailOut:
+    reservation, event = create_reservation(
+        db,
+        food_listing_id=payload.food_listing_id,
+        recipient=user,
+        quantity=payload.quantity,
+        request_id=request.state.request_id,
+        actor=user,
+    )
     db.commit()
     return reservation_detail(reservation, [event], True)
 

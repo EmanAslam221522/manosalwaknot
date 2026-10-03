@@ -7,13 +7,60 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 from starlette.middleware.base import RequestResponseEndpoint
 
-from app.api import admin, auth, deliveries, food, mano, notifications, profile, reservations, trust
+from app.api import admin, auth, deliveries, food, mano, matching, notifications, profile, reservations, safety, trust
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.errors import ApiError, api_error_handler
 from app.core.rate_limit import check_redis
 
 settings = get_settings()
+
+
+def validate_embedding_configuration():
+    """Validate that embedding configuration matches database schema."""
+    try:
+        with engine.connect() as connection:
+            # Check if pgvector is available
+            vector_available = connection.scalar(
+                text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")
+            )
+            if not vector_available:
+                raise ApiError(
+                    500,
+                    "PGVECTOR_UNAVAILABLE",
+                    "pgvector extension is not available. RAG features require pgvector.",
+                )
+
+            # Check if knowledge_chunks table exists
+            table_exists = connection.scalar(
+                text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'knowledge_chunks')")
+            )
+            if table_exists:
+                # Check vector column dimension
+                # This is a simplified check - in production you might want to inspect the actual column type
+                # For now, we trust the migration set VECTOR(1536) and validate config matches
+                if settings.embedding_dimension != 1536:
+                    raise ApiError(
+                        500,
+                        "EMBEDDING_CONFIG_MISMATCH",
+                        f"EMBEDDING_DIMENSION is set to {settings.embedding_dimension}, but database expects 1536. "
+                        "Update configuration or run migration to change vector dimension.",
+                    )
+    except ApiError:
+        raise
+    except Exception as exc:
+        # Don't fail startup for validation errors in non-production
+        if settings.environment == "production":
+            raise ApiError(500, "CONFIG_VALIDATION_FAILED", "Failed to validate embedding configuration.") from exc
+
+
+# Validate embedding configuration on startup
+try:
+    validate_embedding_configuration()
+except ApiError:
+    if settings.environment == "production":
+        raise
+
 app = FastAPI(
     title="ManOSalwaKnot API",
     version="1.0.0",
@@ -115,5 +162,7 @@ for router in (
     notifications.router,
     deliveries.router,
     mano.router,
+    matching.router,
+    safety.router,
 ):
     app.include_router(router, prefix=settings.api_v1_prefix)

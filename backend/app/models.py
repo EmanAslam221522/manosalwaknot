@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from typing import Any
-
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -18,9 +17,10 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    Time,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, VECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -88,11 +88,41 @@ class VerificationStatus(str, enum.Enum):
     NEEDS_INFORMATION = "NEEDS_INFORMATION"
 
 
+class OrganizationType(str, enum.Enum):
+    NGO = "NGO"
+    HOSTEL = "HOSTEL"
+    UNIVERSITY = "UNIVERSITY"
+    COMMUNITY_KITCHEN = "COMMUNITY_KITCHEN"
+
+
+class FoodMatchStatus(str, enum.Enum):
+    RECOMMENDED = "RECOMMENDED"
+    ACCEPTED = "ACCEPTED"
+    DECLINED = "DECLINED"
+    EXPIRED = "EXPIRED"
+    SUPERSEDED = "SUPERSEDED"
+
+
 class ReportStatus(str, enum.Enum):
     OPEN = "OPEN"
     UNDER_REVIEW = "UNDER_REVIEW"
     RESOLVED = "RESOLVED"
     DISMISSED = "DISMISSED"
+
+
+class DocumentApprovalStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    APPROVED = "APPROVED"
+    ARCHIVED = "ARCHIVED"
+    REJECTED = "REJECTED"
+
+
+class DocumentType(str, enum.Enum):
+    REGULATION = "REGULATION"
+    GUIDANCE = "GUIDANCE"
+    POLICY = "POLICY"
+    MANUAL = "MANUAL"
+    SOP = "SOP"
 
 
 class UUIDTimestampMixin:
@@ -361,6 +391,72 @@ class AiMessage(UUIDTimestampMixin, Base):
     client_message_id: Mapped[str | None] = mapped_column(String(128))
 
 
+class OrganizationProfile(UUIDTimestampMixin, Base):
+    __tablename__ = "organization_profiles"
+    __table_args__ = (
+        CheckConstraint("daily_capacity > 0", name="daily_capacity_positive"),
+        CheckConstraint("people_served >= 0", name="people_served_nonnegative"),
+        CheckConstraint("max_distance_km > 0", name="max_distance_positive"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    location_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("locations.id"), index=True)
+    organization_type: Mapped[OrganizationType] = mapped_column(
+        Enum(OrganizationType, native_enum=False, length=32)
+    )
+    daily_capacity: Mapped[int] = mapped_column(Integer)
+    people_served: Mapped[int] = mapped_column(Integer, default=0)
+    accepted_category_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    pickup_window_start: Mapped[time] = mapped_column(Time(timezone=False))
+    pickup_window_end: Mapped[time] = mapped_column(Time(timezone=False))
+    max_distance_km: Mapped[Decimal] = mapped_column(Numeric(6, 2))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    user: Mapped[User] = relationship()
+    location: Mapped[Location] = relationship()
+
+
+class FoodMatch(UUIDTimestampMixin, Base):
+    __tablename__ = "food_matches"
+    __table_args__ = (
+        UniqueConstraint("food_listing_id", "organization_id"),
+        CheckConstraint("quantity_snapshot > 0", name="quantity_snapshot_positive"),
+        CheckConstraint("score >= 0 AND score <= 100", name="score_range"),
+        Index("ix_food_matches_listing_status", "food_listing_id", "status"),
+        Index("ix_food_matches_organization_status", "organization_id", "status"),
+    )
+
+    food_listing_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("food_listings.id", ondelete="CASCADE"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    organization_profile_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organization_profiles.id"), index=True
+    )
+    reservation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("reservations.id"), unique=True
+    )
+    accepted_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    declined_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[FoodMatchStatus] = mapped_column(
+        Enum(FoodMatchStatus, native_enum=False, length=24),
+        default=FoodMatchStatus.RECOMMENDED,
+        index=True,
+    )
+    quantity_snapshot: Mapped[int] = mapped_column(Integer)
+    score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    score_breakdown: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    explanation: Mapped[str] = mapped_column(Text)
+
+    food: Mapped[FoodListing] = relationship()
+    organization: Mapped[User] = relationship(foreign_keys=[organization_id])
+    profile: Mapped[OrganizationProfile] = relationship()
+    reservation: Mapped[Reservation | None] = relationship()
+
+
 class AiAction(UUIDTimestampMixin, Base):
     __tablename__ = "ai_actions"
     __table_args__ = (UniqueConstraint("conversation_id", "idempotency_key"),)
@@ -377,3 +473,48 @@ class AiAction(UUIDTimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(16), default="PENDING")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(200))
+
+
+class KnowledgeDocument(UUIDTimestampMixin, Base):
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        Index("ix_knowledge_docs_approval", "approval_status", "jurisdiction"),
+        Index("ix_knowledge_docs_effective", "effective_from", "effective_until"),
+        Index("ix_knowledge_docs_source", "source", "document_type"),
+    )
+
+    title: Mapped[str] = mapped_column(String(300))
+    source: Mapped[str] = mapped_column(String(120), index=True)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    document_type: Mapped[DocumentType] = mapped_column(Enum(DocumentType, native_enum=False, length=16), index=True)
+    version: Mapped[str] = mapped_column(String(40))
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    effective_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approval_status: Mapped[DocumentApprovalStatus] = mapped_column(
+        Enum(DocumentApprovalStatus, native_enum=False, length=16), default=DocumentApprovalStatus.DRAFT, index=True
+    )
+    jurisdiction: Mapped[str] = mapped_column(String(80), index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class KnowledgeChunk(UUIDTimestampMixin, Base):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        Index("ix_knowledge_chunks_document", "document_id", "chunk_index"),
+        Index("ix_knowledge_chunks_approval", "approval_status"),
+    )
+
+    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float] | None] = mapped_column(VECTOR(1536))
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    section_title: Mapped[str | None] = mapped_column(String(300))
+    metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    approval_status: Mapped[DocumentApprovalStatus] = mapped_column(
+        Enum(DocumentApprovalStatus, native_enum=False, length=16), default=DocumentApprovalStatus.DRAFT, index=True
+    )
+
+    document: Mapped[KnowledgeDocument] = relationship()

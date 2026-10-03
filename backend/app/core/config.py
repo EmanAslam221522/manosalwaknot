@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,31 @@ class Settings(BaseSettings):
     groq_base_url: AnyHttpUrl = Field(default_factory=lambda: AnyHttpUrl("https://api.groq.com/openai/v1"))
     otp_debug_code: SecretStr | None = None
     max_upload_bytes: int = Field(default=8_000_000, ge=100_000, le=20_000_000)
+    match_weight_location: float = Field(default=0.30, ge=0, le=1)
+    match_weight_capacity: float = Field(default=0.25, ge=0, le=1)
+    match_weight_timing: float = Field(default=0.20, ge=0, le=1)
+    match_weight_demand: float = Field(default=0.15, ge=0, le=1)
+    match_weight_readiness: float = Field(default=0.10, ge=0, le=1)
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimension: int = Field(default=1536, ge=1, le=3072)
+    rag_top_k: int = Field(default=5, ge=1, le=20)
+    rag_similarity_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    rag_min_evidence: int = Field(default=2, ge=1, le=10)
+    max_document_size: int = Field(default=10_000_000, ge=1000, le=50_000_000)  # 10MB default
+    min_document_size: int = Field(default=100, ge=10, le=1000)
+
+    @model_validator(mode="after")
+    def matching_weights_must_sum_to_one(self) -> "Settings":
+        total = (
+            self.match_weight_location
+            + self.match_weight_capacity
+            + self.match_weight_timing
+            + self.match_weight_demand
+            + self.match_weight_readiness
+        )
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError("Matching score weights must sum to 1.0")
+        return self
 
     @field_validator("database_url", "migrations_database_url")
     @classmethod
